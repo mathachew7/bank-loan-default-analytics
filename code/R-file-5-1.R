@@ -1,0 +1,823 @@
+#----------------------Setting up the working directoy ---------------------#
+setwd("//Users//subashyadav//Documents//Practicum//Project 2//")
+
+#----------------------Loading the necessary libraries-------------------------#
+library(dplyr)
+library(ggplot2)
+library(caret) 
+library(psych)
+library(skimr)
+library(reshape2)
+library(corrplot)
+library(VIM)
+library(randomForest)
+library(glmnet)
+library(caret)
+library(stats)
+library(scales)
+library(rpart)
+library(rpart.plot)
+library(factoextra)
+library(cluster)
+library(dendextend)
+library(pROC)
+
+#install.packages("factoextra")
+#install.packages("rpart")
+#install.packages("dendextend")
+
+#install.packages("glmnet")
+#install.packages("VIM")
+#install.packages("corrplot")
+#install.packages("randomForest")
+
+#setting the plot 
+# Turn off scientific notation
+options(scipen = 999)
+
+#----------------------Loading the dataset-------------------------#
+#loading the dataset
+loan_data <- read.csv("../data/Loan.csv", stringsAsFactors = FALSE)
+
+#getting first few data
+head(loan_data)
+
+names(loan_data)
+#---------------------Preprocessing the dataset-------------------#
+# View basic structure of the dataset
+str(loan_data)
+
+# Check for any duplicated rows in the dataset
+duplicated_rows <- sum(duplicated(loan_data))
+print(paste("Number of duplicated rows:", duplicated_rows))
+
+# Get summary statistics for all columns
+summary(loan_data)
+
+# For more detailed summary statistics, particularly for numeric variables
+describe(loan_data)
+
+# Alternatively, you can use the skimr package for a more comprehensive summary
+skim(loan_data)
+
+
+#-----------------------Exploring the Blank values/Missing value in dataset --------------#
+
+# we have few rows in REASON AND JOB column that are empty string instead null values. 
+# Count the number of blank (empty string) values for each column in the selected set
+blank_values_count <- sapply(loan_data[, c("MORTDUE", "VALUE", "REASON", "JOB", "YOJ", "DEROG", "DELINQ", "CLAGE", "NINQ", "CLNO", "DEBTINC")], function(x) sum(trimws(x) == ""))
+blank_values_count
+
+# Replace empty strings with NA for categorical columns 'REASON' and 'JOB'
+loan_data$REASON[loan_data$REASON == ""] <- NA
+loan_data$JOB[loan_data$JOB == ""] <- NA
+
+#-----------------------Missing value in dataset --------------#
+# Check for missing values in the dataset
+missing_values_count <- colSums(is.na(loan_data))
+
+# Filter out columns that have missing values
+missing_columns <- missing_values_count[missing_values_count > 0]
+
+# Calculate the percentage of missing values for each column
+missing_percentage <- (missing_columns / nrow(loan_data)) * 100
+
+# Convert missing data into a data frame for plotting, including percentage of missing values
+missing_data_df <- data.frame(
+  Column = names(missing_columns),
+  MissingValues = missing_columns,
+  MissingPercentage = round(missing_percentage, 2)
+)
+
+# Display the data frame
+missing_data_df
+
+# Plot the missing values with count on bars
+ggplot(missing_data_df, aes(x = reorder(Column, -MissingValues), y = MissingValues)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = paste0(MissingPercentage, "%")), vjust = -0.5, color = "black", size = 3.5) +
+  labs(title = "Missing Values in Columns", x = "Columns", y = "Number of Missing Values") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+#----------Removing the missing values for all these specified columns-------#
+# main aim is that if we have missing values simultaneously in all these columns together 
+#like more than 6 columns then remove it 
+#Define the columns to check for missing values
+selected_columns <- loan_data[, c("MORTDUE", "VALUE", "REASON", "JOB", "YOJ", "DEROG", "DELINQ", "CLAGE", "NINQ", "CLNO", "DEBTINC")]
+
+# Identify rows where more than 6 selected columns have missing values
+rows_to_remove <- apply(selected_columns, 1, function(row) sum(is.na(row)) > 6)
+
+# Count the number of rows with more than 6 values missing
+sum(rows_to_remove)
+
+# Remove rows where all selected columns have missing values
+loan_data <- loan_data[!rows_to_remove, ]
+
+#---------Handling missing values using different ways--------------#
+#let's handle the missing values in dataset
+
+#Impute Missing Values for Categorical Variables
+# Use Mode Imputation for 'REASON' and 'JOB'
+mode_impute <- function(x) {
+  ux <- unique(x[!is.na(x)])
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+loan_data$REASON[is.na(loan_data$REASON)] <- mode_impute(loan_data$REASON)
+loan_data$JOB[is.na(loan_data$JOB)] <- mode_impute(loan_data$JOB)
+
+
+# Median Imputation for Numeric Columns with Skewed Data
+loan_data$MORTDUE[is.na(loan_data$MORTDUE)] <- median(loan_data$MORTDUE, na.rm = TRUE)
+loan_data$VALUE[is.na(loan_data$VALUE)] <- median(loan_data$VALUE, na.rm = TRUE)
+loan_data$DEROG[is.na(loan_data$DEROG)] <- median(loan_data$DEROG, na.rm = TRUE)
+loan_data$DELINQ[is.na(loan_data$DELINQ)] <- median(loan_data$DELINQ, na.rm = TRUE)
+loan_data$CLNO[is.na(loan_data$CLNO)] <- median(loan_data$CLNO, na.rm = TRUE)
+loan_data$DEBTINC[is.na(loan_data$DEBTINC)] <- median(loan_data$DEBTINC, na.rm = TRUE)
+
+
+# Perform KNN imputation for 'YOJ', 'CLAGE', and 'NINQ'
+loan_data_knn <- kNN(loan_data, variable = c("YOJ", "CLAGE", "NINQ"), k = 5)
+
+# Replace original columns with KNN imputed data
+loan_data$YOJ <- loan_data_knn$YOJ
+loan_data$CLAGE <- loan_data_knn$CLAGE
+loan_data$NINQ <- loan_data_knn$NINQ
+
+
+#checking again if there are any other missing values in the dataset
+# Check for missing values in the dataset
+missing_values_count <- colSums(is.na(loan_data))
+missing_values_count
+
+head(loan_data)
+
+#summary after imputation
+summary(loan_data)
+
+#------------------------------------Visualization and EDA ---------------------------#
+
+# Select the columns for correlation analysis, including numeric and encoded categorical features
+loan_data_encoded <- model.matrix(~REASON + JOB - 1, data = loan_data)
+loan_data_combined <- cbind(loan_data[, c("BAD", "LOAN", "MORTDUE", "VALUE", "YOJ", "DEROG", "DELINQ", "CLAGE", "NINQ", "CLNO", "DEBTINC")], loan_data_encoded)
+
+# Calculate the correlation matrix (considering Spearman for non-linear relationships)
+correlation_matrix_selected <- cor(loan_data_combined, use = "complete.obs", method = "spearman")
+
+# Print the correlation matrix
+print(correlation_matrix_selected)
+
+# Extract correlation of each feature with target variable BAD
+correlation_with_bad <- correlation_matrix_selected["BAD", ]
+print(correlation_with_bad)
+
+# Visualize the correlation matrix with numbers (focus on relationships for classification and clustering)
+corrplot(correlation_matrix_selected, method = "number", type = "upper", 
+         tl.col = "black", tl.cex = 0.8, col = colorRampPalette(c("blue", "white", "red"))(20),
+         title = "Correlation Matrix for Default Prediction & Customer Segmentation", mar = c(0, 0, 2, 0))
+
+# Visualize the correlation matrix with colors (for better identification of strong relationships)
+corrplot(correlation_matrix_selected, method = "color", type = "upper", 
+         tl.col = "black", tl.cex = 0.8, col = colorRampPalette(c("blue", "white", "red"))(20),
+         title = "Correlation Matrix for Default Prediction & Customer Segmentation", mar = c(0, 0, 2, 0))
+
+
+# Bar Plot of Default Rate by Job Type
+ggplot(loan_data, aes(x = JOB, fill = factor(BAD))) +
+  geom_bar(position = "fill", color = "black") +
+  scale_fill_manual(values = c("0" = "steelblue", "1" = "navy")) +
+  geom_text(
+    stat = 'count',
+    aes(label = scales::percent(after_stat(count) / tapply(after_stat(count), after_stat(x), sum)[after_stat(x)], accuracy = 1)),
+    position = position_fill(vjust = 0.5), color = "white", size = 3.5
+  ) +
+  labs(title = "Default Rate by Job Type", x = "Job Type", y = "Percentage of Defaults", fill = "Default (BAD)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Boxplot of Debt-to-Income Ratio by Default Status
+ggplot(loan_data, aes(x = factor(BAD), y = DEBTINC, fill = factor(BAD))) +
+  geom_boxplot() +
+  labs(title = "Debt-to-Income Ratio by Default Status", x = "Default (BAD)", y = "Debt-to-Income Ratio", fill = "Default Status") +
+  scale_fill_manual(values = c("0" = "steelblue", "1" = "navy")) +
+  theme_minimal()
+
+# Histogram of Delinquencies (DELINQ)
+ggplot(loan_data, aes(x = DELINQ, fill = factor(BAD))) +
+  geom_histogram(binwidth = 1, position = "stack", color = "black") +
+  scale_fill_manual(values = c("0" = "steelblue", "1" = "navy")) +
+  labs(title = "Distribution of Delinquencies by Default Status", x = "Number of Delinquencies", y = "Count", fill = "Default (BAD)") +
+  theme_minimal()
+
+
+# Scatterplot of Loan Amount vs Mortgage Due
+ggplot(loan_data, aes(x = LOAN, y = MORTDUE, color = factor(BAD))) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = c("0" = "steelblue", "1" = "navy")) +
+  labs(title = "Scatterplot of Loan Amount vs Mortgage Due", x = "Loan Amount", y = "Mortgage Due", color = "Default (BAD)") +
+  theme_minimal()
+
+
+# Density plot of Age of Oldest Credit Line (CLAGE)
+ggplot(loan_data, aes(x = CLAGE, fill = factor(BAD))) +
+  geom_density(alpha = 0.5) +
+  scale_fill_manual(values = c("0" = "steelblue", "1" = "navy")) +
+  labs(title = "Density Plot of Age of Oldest Credit Line by Default Status", x = "Age of Oldest Credit Line (CLAGE)", y = "Density", fill = "Default (BAD)") +
+  theme_minimal()
+
+
+# Bar Plot of Recent Credit Inquiries by Default Status
+ggplot(loan_data, aes(x = NINQ, fill = factor(BAD))) +
+  geom_bar(position = "stack", color = "black") +
+  scale_fill_manual(values = c("0" = "steelblue", "1" = "navy")) +
+  labs(title = "Recent Credit Inquiries by Default Status", x = "Number of Recent Credit Inquiries", y = "Count", fill = "Default (BAD)") +
+  theme_minimal()
+
+
+
+# Scatterplot Matrix for Selected Variables with Color by Default Status
+pairs(~LOAN + MORTDUE + VALUE + YOJ + DEBTINC, data = loan_data, 
+      main = "Scatterplot Matrix for Loan Data", 
+      pch = 21, bg = c("red", "blue")[loan_data$BAD + 1])
+
+
+#---------------------------Feature Selection--------------------------#
+
+#feature importance using random forest
+# Set seed for reproducibility
+set.seed(123)
+# Train a Random Forest model using default settings
+rf_model <- randomForest(BAD ~ ., data = loan_data, importance = TRUE)
+# Get feature importance
+importance(rf_model)
+# Visualize the feature importance
+varImpPlot(rf_model, main = "Feature Importance from Random Forest")
+
+
+#LASSO Regression for Feature Selection
+# Prepare the data
+set.seed(123)  # Setting seed for reproducibility
+
+# Selecting only numeric and encoded categorical columns (excluding "BAD" from predictors)
+# Assuming we have already encoded categorical variables like REASON and JOB
+predictors <- loan_data[, !names(loan_data) %in% c("BAD")]
+target <- loan_data$BAD
+
+# Convert non-numeric columns to numeric using one-hot encoding if they are still categorical
+loan_data_encoded <- model.matrix(~REASON + JOB - 1, data = loan_data)
+loan_data_encoded
+
+# Combine encoded categorical columns with the rest of the numeric features
+numeric_predictors <- loan_data[, c("LOAN", "MORTDUE", "VALUE", "YOJ", "DEROG", "DELINQ", "CLAGE", "NINQ", "CLNO", "DEBTINC")]
+predictors <- cbind(numeric_predictors, loan_data_encoded)
+
+# Standardizing the predictors
+predictors_scaled <- scale(predictors)
+
+# Check if scaling was successful
+print(head(predictors_scaled))
+
+# Split dataset into training and test sets
+set.seed(123)
+train_indices <- createDataPartition(target, p = 0.7, list = FALSE)
+train_predictors <- predictors_scaled[train_indices, ]
+test_predictors <- predictors_scaled[-train_indices, ]
+train_target <- target[train_indices]
+test_target <- target[-train_indices]
+
+# Create a LASSO model using glmnet
+set.seed(123)
+lasso_model <- cv.glmnet(as.matrix(train_predictors), train_target, 
+                         alpha = 1,  # Alpha = 1 for LASSO
+                         family = "binomial",  # Since predicting a binary outcome
+                         type.measure = "mse",  # Measure to minimize during cross-validation
+                         nfolds = 10)  # 10-fold cross-validation
+
+# Find the optimal lambda value
+optimal_lambda <- lasso_model$lambda.min
+
+# Fit the LASSO model using the optimal lambda
+lasso_best_model <- glmnet(as.matrix(train_predictors), train_target, 
+                           alpha = 1, lambda = optimal_lambda, family = "binomial")
+
+# Extract the coefficients from the LASSO model
+lasso_coefficients <- coef(lasso_best_model)
+print(lasso_coefficients)
+
+# Predict on the test set
+lasso_predictions <- predict(lasso_best_model, as.matrix(test_predictors), type = "response")
+lasso_class <- ifelse(lasso_predictions > 0.5, 1, 0)
+
+# Evaluate model performance
+conf_matrix <- confusionMatrix(as.factor(lasso_class), as.factor(test_target))
+print(conf_matrix)
+
+
+#--------------- Selection of Required Variables for Each Business Goal -----------------#
+colnames(loan_data)
+
+# Classification Dataset
+classification_data <- loan_data[, c("BAD", "DEBTINC", "DELINQ", "CLNO", "CLAGE", "DEROG", 
+                                     "NINQ", "YOJ", "MORTDUE", "VALUE", "LOAN", "REASON", "JOB")]
+
+# Clustering Dataset - Including all available variables
+clustering_data <- loan_data[, c("BAD", "DEBTINC", "DELINQ", "CLNO", "CLAGE", "DEROG", 
+                                 "NINQ", "YOJ", "MORTDUE", "VALUE", "LOAN", "REASON", "JOB")]
+
+
+# ------------ Data Transformation for Classification Dataset --------------- #
+
+# Step 1: No Scaling for Classification
+classification_data <- loan_data[, c("BAD", "DEBTINC", "DELINQ", "CLNO", "CLAGE", "DEROG", 
+                                     "NINQ", "YOJ", "MORTDUE", "VALUE", "LOAN", "REASON", "JOB")]
+
+# Use categorical variables directly as factors
+classification_data$REASON <- as.factor(classification_data$REASON)
+classification_data$JOB <- as.factor(classification_data$JOB)
+
+# Step 2: Data Inspection
+# Check the first few rows to confirm transformation
+head(classification_data)
+
+# -------------------- Clustering Data Transformation and Separation -------------------- #
+
+# Apply Z-score standardization for numeric features
+numeric_columns_clustering <- c("DEBTINC", "DELINQ", "CLNO", "CLAGE", "DEROG", "NINQ", "YOJ", "MORTDUE", "VALUE", "LOAN")
+clustering_data_standardized <- as.data.frame(scale(clustering_data[, numeric_columns_clustering]))
+
+# Apply one-hot encoding to categorical variables
+clustering_data_encoded <- model.matrix(~ REASON + JOB - 1, data = clustering_data)
+
+# Combine Standardized Numeric Data with Encoded Categorical Variables
+clustering_data_final <- cbind(clustering_data_standardized, clustering_data_encoded, BAD = clustering_data$BAD)
+
+# Separate into Defaulters (BAD = 1) and Non-Defaulters (BAD = 0)
+clustering_data_defaulters <- clustering_data_final[clustering_data_final$BAD == 1, ]
+clustering_data_non_defaulters <- clustering_data_final[clustering_data_final$BAD == 0, ]
+
+# Drop the BAD column from both datasets (since it's not relevant for clustering)
+clustering_data_defaulters <- clustering_data_defaulters[, !names(clustering_data_defaulters) %in% "BAD"]
+clustering_data_non_defaulters <- clustering_data_non_defaulters[, !names(clustering_data_non_defaulters) %in% "BAD"]
+
+# View the sizes of the datasets
+cat("Defaulters Dataset Size:", nrow(clustering_data_defaulters), "\n")
+cat("Non-Defaulters Dataset Size:", nrow(clustering_data_non_defaulters), "\n")
+
+# Summary statistics for both datasets
+cat("Summary for Defaulters Dataset:\n")
+summary(clustering_data_defaulters)
+
+cat("Summary for Non-Defaulters Dataset:\n")
+summary(clustering_data_non_defaulters)
+
+
+
+# --------------------Dataset Partitioning -------------------- #
+
+# -------------------- Classification Dataset Partitioning -------------------- #
+
+# Extract the target variable ('BAD' for loan defaults)
+classification_target <- classification_data$BAD
+
+# Create an 70-30 partition for training and testing sets using stratified sampling
+set.seed(123) # For reproducibility
+train_indices_classification <- createDataPartition(classification_target, p = 0.7, list = FALSE)
+
+# Partition the data into training and test sets
+classification_train <- classification_data[train_indices_classification, ]
+classification_test <- classification_data[-train_indices_classification, ]
+
+# View the size of the training and test sets
+cat("Classification Training Set Size:", nrow(classification_train), "\n")
+cat("Classification Test Set Size:", nrow(classification_test), "\n")
+
+
+# -------------------- Visualization for Classification Data Partition -------------------- #
+
+# Create a dataframe summarizing the number of rows in training and test sets for classification
+classification_partition_summary <- data.frame(
+  Set = c("Training", "Test"),
+  Count = c(nrow(classification_train), nrow(classification_test))
+)
+
+# Calculate percentages
+classification_partition_summary$Percentage <- round(
+  (classification_partition_summary$Count / sum(classification_partition_summary$Count)) * 100, 1
+)
+
+# Pie chart for classification dataset split with percentages
+ggplot(classification_partition_summary, aes(x = "", y = Count, fill = Set)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  labs(
+    title = "Data Partition Proportions for Classification",
+    x = NULL, y = NULL, fill = "Set"
+  ) +
+  theme_void() +
+  geom_text(
+    aes(label = paste0(Percentage, "%")),
+    position = position_stack(vjust = 0.5), color = "white", size = 5
+  ) +
+  scale_fill_manual(values = c("Training" = "steelblue", "Test" = "navy"))
+
+#---------------------- Model Building for Loan Default Prediction -------------------------#
+
+names(classification_data)
+names(classification_train)
+names(classification_test)
+
+#---------------------- 1. Data Preparation for Modeling -------------------------#
+# Convert target variable BAD to a factor for classification models
+classification_train$BAD <- as.factor(classification_train$BAD)
+classification_test$BAD <- as.factor(classification_test$BAD)
+
+#---------------------- 2. Building the Logistic Regression Model -------------------------#
+
+# Train a logistic regression model
+logistic_model <- glm(BAD ~ ., data = classification_train, family = binomial)
+
+# Display summary of the logistic regression model
+summary(logistic_model)
+
+#---------------------- Making Predictions with Logistic Regression -------------------------#
+
+# Predict probabilities on the test dataset
+logistic_predictions_prob <- predict(logistic_model, newdata = classification_test, type = "response")
+
+# Convert probabilities to binary class labels (0 or 1) using a threshold of 0.5
+logistic_predictions <- ifelse(logistic_predictions_prob > 0.5, 1, 0)
+
+#---------------------- Evaluating the Logistic Regression Model -------------------------#
+
+# Convert predictions and actual labels to factors for evaluation
+logistic_predictions <- as.factor(logistic_predictions)
+test_labels <- as.factor(classification_test$BAD)
+
+# Confusion matrix for logistic regression
+conf_matrix_logistic <- confusionMatrix(logistic_predictions, test_labels, positive = "1")
+
+# Print confusion matrix and accuracy
+print(conf_matrix_logistic)
+
+# Accuracy, Precision, Recall, and F1 score for logistic regression
+accuracy_logistic <- conf_matrix_logistic$overall['Accuracy']
+precision_logistic <- conf_matrix_logistic$byClass['Precision']
+recall_logistic <- conf_matrix_logistic$byClass['Recall']
+f1_score_logistic <- (2 * precision_logistic * recall_logistic) / (precision_logistic + recall_logistic)
+
+# Print metrics
+cat("Logistic Regression Accuracy: ", round(accuracy_logistic, 3), "\n")
+cat("Logistic Regression Precision: ", round(precision_logistic, 3), "\n")
+cat("Logistic Regression Recall: ", round(recall_logistic, 3), "\n")
+cat("Logistic Regression F1 Score: ", round(f1_score_logistic, 3), "\n")
+
+# Visualize Logistic Regression Coefficients
+coefficients_df <- as.data.frame(summary(logistic_model)$coefficients)
+coefficients_df$Variable <- rownames(coefficients_df)
+colnames(coefficients_df) <- c("Estimate", "Std.Error", "Z_value", "P_value", "Variable")
+
+ggplot(coefficients_df, aes(x = reorder(Variable, Estimate), y = Estimate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Logistic Regression Coefficients", x = "Variable", y = "Coefficient Estimate") +
+  theme_minimal()
+
+#---------------------- 2. Building the Random Forest Model -------------------------#
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Train a Random Forest model
+rf_model <- randomForest(BAD ~ ., data = classification_train, importance = TRUE, ntree = 500)
+
+# Print model summary for Random Forest
+print(rf_model)
+
+#---------------------- Making Predictions with Random Forest -------------------------#
+
+# Predict on the test dataset
+rf_predictions <- predict(rf_model, newdata = classification_test)
+
+#---------------------- Evaluating the Random Forest Model -------------------------#
+
+# Confusion matrix for Random Forest
+conf_matrix_rf <- confusionMatrix(rf_predictions, classification_test$BAD, positive = "1")
+
+# Print confusion matrix and accuracy
+print(conf_matrix_rf)
+
+# Accuracy, Precision, Recall, and F1 score for Random Forest
+accuracy_rf <- conf_matrix_rf$overall['Accuracy']
+precision_rf <- conf_matrix_rf$byClass['Precision']
+recall_rf <- conf_matrix_rf$byClass['Recall']
+f1_score_rf <- (2 * precision_rf * recall_rf) / (precision_rf + recall_rf)
+
+# Print metrics
+cat("Random Forest Accuracy: ", round(accuracy_rf, 3), "\n")
+cat("Random Forest Precision: ", round(precision_rf, 3), "\n")
+cat("Random Forest Recall: ", round(recall_rf, 3), "\n")
+cat("Random Forest F1 Score: ", round(f1_score_rf, 3), "\n")
+
+# Visualize feature importance in Random Forest
+varImpPlot(rf_model, main = "Feature Importance from Random Forest")
+
+#---------------------- 4. Building the Decision Tree Model -------------------------#
+
+# Train a Decision Tree model
+decision_tree_model <- rpart(BAD ~ ., data = classification_train, method = "class")
+
+# Print summary of the Decision Tree model
+print(summary(decision_tree_model))
+
+#---------------------- Making Predictions with Decision Tree -------------------------#
+
+# Predict on the test dataset
+tree_predictions <- predict(decision_tree_model, newdata = classification_test, type = "class")
+
+#---------------------- Evaluating the Decision Tree Model -------------------------#
+
+# Confusion matrix for Decision Tree
+conf_matrix_tree <- confusionMatrix(tree_predictions, classification_test$BAD, positive = "1")
+
+# Print confusion matrix and accuracy
+print(conf_matrix_tree)
+
+# Accuracy, Precision, Recall, and F1 score for Decision Tree
+accuracy_tree <- conf_matrix_tree$overall['Accuracy']
+precision_tree <- conf_matrix_tree$byClass['Precision']
+recall_tree <- conf_matrix_tree$byClass['Recall']
+f1_score_tree <- (2 * precision_tree * recall_tree) / (precision_tree + recall_tree)
+
+# Print metrics
+cat("Decision Tree Accuracy: ", round(accuracy_tree, 3), "\n")
+cat("Decision Tree Precision: ", round(precision_tree, 3), "\n")
+cat("Decision Tree Recall: ", round(recall_tree, 3), "\n")
+cat("Decision Tree F1 Score: ", round(f1_score_tree, 3), "\n")
+
+# Visualize the Decision Tree
+rpart.plot(decision_tree_model, main = "Decision Tree for Loan Default Prediction")
+
+
+
+#--------------------------------Clustering------------------------------------------------------#
+
+str(clustering_data_defaulters)
+
+
+# ------------------------------- Elbow and Silhouette for Defaulters ---------------------------------------- #
+# Elbow Method for Defaulters
+set.seed(123)
+fviz_nbclust(clustering_data_defaulters, kmeans, method = "wss", k.max = 10) + 
+  geom_vline(xintercept = 4, linetype = 2, color = "red") + 
+  labs(subtitle = "Elbow Method for Defaulters", x = "Number of Clusters", y = "Total Within Sum of Squares")
+
+# Silhouette Method for Defaulters
+set.seed(123)
+fviz_nbclust(clustering_data_defaulters, kmeans, method = "silhouette", k.max = 10) + 
+  labs(subtitle = "Silhouette Method for Defaulters", x = "Number of Clusters", y = "Average Silhouette Width")
+
+# ------------------------------- Elbow and Silhouette for Non-Defaulters ------------------------------------ #
+
+# Elbow Method for Non-Defaulters
+set.seed(123)
+fviz_nbclust(clustering_data_non_defaulters, kmeans, method = "wss", k.max = 10) + 
+  geom_vline(xintercept = 4, linetype = 2, color = "red") + 
+  labs(subtitle = "Elbow Method for Non-Defaulters", x = "Number of Clusters", y = "Total Within Sum of Squares")
+
+# Silhouette Method for Non-Defaulters
+set.seed(123)
+fviz_nbclust(clustering_data_non_defaulters, kmeans, method = "silhouette", k.max = 10) + 
+  labs(subtitle = "Silhouette Method for Non-Defaulters", x = "Number of Clusters", y = "Average Silhouette Width")
+
+#---------------------------------K-Means Clustering--------------------------------------------#
+# ------------------------------- K-Means for Defaulters ---------------------------------------- #
+# Set the number of clusters
+optimal_clusters_defaulters <- 3  
+
+# Perform K-Means Clustering
+set.seed(123)
+kmeans_result_defaulters <- kmeans(clustering_data_defaulters, centers = optimal_clusters_defaulters, nstart = 25)
+
+# Add cluster labels to the dataset
+clustering_data_defaulters$Cluster <- kmeans_result_defaulters$cluster
+
+# View the cluster sizes
+cat("Cluster sizes for Defaulters:\n")
+print(table(kmeans_result_defaulters$cluster))
+
+# Silhouette Plot for Defaulters
+silhouette_kmeans_defaulters <- silhouette(kmeans_result_defaulters$cluster, dist(clustering_data_defaulters[, -ncol(clustering_data_defaulters)]))
+
+# Plot silhouette information for Defaulters
+plot(
+  silhouette_kmeans_defaulters, 
+  col = 1:optimal_clusters_defaulters, 
+  border = NA, 
+  main = "Silhouette Plot for K-Means (Defaulters)"
+)
+
+# Convert cluster centers to a data frame
+cluster_centers_defaulters <- as.data.frame(kmeans_result_defaulters$centers)
+
+# Add feature names as a column
+cluster_centers_defaulters$Feature <- rownames(cluster_centers_defaulters)
+
+# Reshape the data for ggplot
+cluster_centers_defaulters_long <- tidyr::pivot_longer(
+  cluster_centers_defaulters,
+  cols = -Feature,
+  names_to = "Cluster",
+  values_to = "Average Value"
+)
+
+# Convert Cluster column to factor
+cluster_centers_defaulters_long$Cluster <- as.factor(cluster_centers_defaulters_long$Cluster)
+
+# Create the bar plot
+ggplot(cluster_centers_defaulters_long, aes(x = Feature, y = `Average Value`, fill = Cluster)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Cluster Centers by Feature (Defaulters)", 
+       x = "Feature", y = "Average Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# ------------------------------- K-Means for Non-Defaulters ---------------------------------------- #
+# Setting number of clusters
+optimal_clusters_non_defaulters <- 3  
+
+# Perform K-Means Clustering
+set.seed(123)
+kmeans_result_non_defaulters <- kmeans(clustering_data_non_defaulters, centers = optimal_clusters_non_defaulters, nstart = 25)
+
+# Add cluster labels to the dataset
+clustering_data_non_defaulters$Cluster <- kmeans_result_non_defaulters$cluster
+
+# View the cluster sizes
+cat("Cluster sizes for Non-Defaulters:\n")
+print(table(kmeans_result_non_defaulters$cluster))
+
+# Silhouette Plot for Non-Defaulters
+silhouette_kmeans_non_defaulters <- silhouette(kmeans_result_non_defaulters$cluster, dist(clustering_data_non_defaulters[, -ncol(clustering_data_non_defaulters)]))
+
+# Plot silhouette information for Non-Defaulters
+plot(
+  silhouette_kmeans_non_defaulters, 
+  col = 1:optimal_clusters_non_defaulters, 
+  border = NA, 
+  main = "Silhouette Plot for K-Means (Non-Defaulters)"
+)
+
+# Convert cluster centers to a data frame
+cluster_centers_non_defaulters <- as.data.frame(kmeans_result_non_defaulters$centers)
+
+# Add feature names as a column
+cluster_centers_non_defaulters$Feature <- rownames(cluster_centers_non_defaulters)
+
+# Reshape the data for ggplot
+cluster_centers_non_defaulters_long <- tidyr::pivot_longer(
+  cluster_centers_non_defaulters,
+  cols = -Feature,
+  names_to = "Cluster",
+  values_to = "Average Value"
+)
+
+# Convert Cluster column to factor
+cluster_centers_non_defaulters_long$Cluster <- as.factor(cluster_centers_non_defaulters_long$Cluster)
+
+# Create the bar plot
+ggplot(cluster_centers_non_defaulters_long, aes(x = Feature, y = `Average Value`, fill = Cluster)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Cluster Centers by Feature (Non-Defaulters)", 
+       x = "Feature", y = "Average Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# ------------------------------- Hierarchical Clustering--------------------------------------------#
+# ------------------------------- Hierarchical Clustering for Defaulters ------------------------------------- #
+
+# Step 1: Calculate the distance matrix (using Euclidean distance)
+dist_defaulters <- dist(clustering_data_defaulters, method = "euclidean")
+
+# Step 2: Perform hierarchical clustering (using Ward's method)
+hc_defaulters <- hclust(dist_defaulters, method = "ward.D2")
+
+# Step 3: Convert to dendrogram for enhanced plotting
+dend_defaulters <- as.dendrogram(hc_defaulters)
+
+# Step 4: Cut the dendrogram to create clusters and color branches
+optimal_clusters_defaulters <- 3  # Set optimal number of clusters based on analysis
+dend_defaulters <- color_branches(dend_defaulters, k = optimal_clusters_defaulters)
+
+# Get cluster assignments for each data point
+clusters_defaulters <- cutree(hc_defaulters, k = optimal_clusters_defaulters)
+
+# Calculate cluster sizes
+cluster_sizes_defaulters <- table(clusters_defaulters)
+
+# Plot the dendrogram for defaulters
+plot(dend_defaulters, 
+     main = "Rectangular Dendrogram for Defaulters", 
+     ylab = "Height", 
+     xlab = "", 
+     sub = "", 
+     axes = TRUE,   # Show axes to display height
+     cex = 0.7,     
+     leaflab = "none")  # Remove leaf labels to reduce messiness
+
+# Add cluster boundaries to the dendrogram
+rect.hclust(hc_defaulters, k = optimal_clusters_defaulters, border = "red")
+
+# Print the number of data points in each cluster for defaulters
+print("Cluster sizes for Defaulters:")
+print(cluster_sizes_defaulters)
+
+
+# ------------------------------- Hierarchical Clustering for Non-Defaulters --------------------------------- #
+
+# Step 1: Calculate the distance matrix (using Euclidean distance)
+dist_non_defaulters <- dist(clustering_data_non_defaulters, method = "euclidean")
+
+# Step 2: Perform hierarchical clustering (using Ward's method)
+hc_non_defaulters <- hclust(dist_non_defaulters, method = "ward.D2")
+
+# Step 3: Convert to dendrogram for enhanced plotting
+dend_non_defaulters <- as.dendrogram(hc_non_defaulters)
+
+# Step 4: Cut the dendrogram to create clusters and color branches
+optimal_clusters_non_defaulters <- 4
+dend_non_defaulters <- color_branches(dend_non_defaulters, k = optimal_clusters_non_defaulters)
+
+# Get cluster assignments for each data point
+clusters_non_defaulters <- cutree(hc_non_defaulters, k = optimal_clusters_non_defaulters)
+
+# Calculate cluster sizes
+cluster_sizes_non_defaulters <- table(clusters_non_defaulters)
+
+# Plot the dendrogram for non-defaulters
+plot(dend_non_defaulters, 
+     main = "Dendrogram for Non-Defaulters", 
+     ylab = "Height", 
+     xlab = "", 
+     sub = "", 
+     axes = TRUE,   # Show axes to display height
+     cex = 0.7,    
+     leaflab = "none")  # Remove leaf labels to reduce messiness
+
+# Add cluster boundaries to the dendrogram
+rect.hclust(hc_non_defaulters, k = optimal_clusters_non_defaulters, border = "blue")
+
+# Print the number of data points in each cluster for non-defaulters
+print("Cluster sizes for Non-Defaulters:")
+print(cluster_sizes_non_defaulters)
+
+
+
+
+# -------------------- Random Forest Model Fine-Tuning -------------------- #
+
+# Define a grid of hyperparameters for tuning
+tune_grid <- expand.grid(
+  mtry = c(2, 3, 5)  # Number of variables sampled at each split
+)
+
+# Set up cross-validation parameters
+train_control <- trainControl(method = "cv", number = 5, search = "grid")
+
+# Train the Random Forest model with tuning
+set.seed(123)
+rf_tuned <- train(
+  BAD ~ ., 
+  data = classification_train, 
+  method = "rf",
+  metric = "Accuracy",  # Focus on accuracy for loan prediction
+  tuneGrid = tune_grid,
+  trControl = train_control
+)
+
+# Best parameters found
+print(rf_tuned$bestTune)
+
+# Predict on the test set using the tuned model
+rf_predictions <- predict(rf_tuned, newdata = classification_test)
+
+# Evaluate the model's performance
+conf_matrix_rf <- confusionMatrix(rf_predictions, classification_test$BAD)
+print(conf_matrix_rf)
+
+# Feature importance for interpretability
+importance_rf <- varImp(rf_tuned)
+plot(importance_rf, main = "Variable Importance - Tuned Random Forest")
+
+# ROC Curve and AUC for validation
+
+rf_prob <- predict(rf_tuned, newdata = classification_test, type = "prob")
+roc_rf <- roc(classification_test$BAD, rf_prob[,2])
+plot(roc_rf, main = "ROC Curve for Tuned Random Forest")
+print(paste("AUC for Random Forest:", auc(roc_rf)))
+
